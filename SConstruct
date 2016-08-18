@@ -33,11 +33,14 @@ hex_copier = env.Command("usb-keypress-trigger.hex", "usb-keypress-trigger.elf",
 env.AlwaysBuild(elf_builder)
 env.AlwaysBuild(hex_copier)
 
-if 'upload-arduino' in COMMAND_LINE_TARGETS:
-    port = ARGUMENTS["port"]
-    upload_command = env.Command(None, "usb-keypress-trigger.hex", "avrdude -pm328 -carduino -P%s -Uflash:w:$SOURCE:a" % port)
-    env.Alias("upload-arduino", upload_command)
+if 'upload' in COMMAND_LINE_TARGETS:
+    mmcu = "atmega32u2"
+    commands = [
+        "dfu-programmer {} erase".format(mmcu),
+        "dfu-programmer {} flash $SOURCE".format(mmcu),
+        "dfu-programmer {} start".format(mmcu)
+    ]
 
-elif 'upload-tiny' in COMMAND_LINE_TARGETS:
-    upload_command = env.Command(None, "usb-keypress-trigger.hex", "avrdude -pm328 -cusbtiny -Uflash:w:$SOURCE:a")
-    env.Alias("upload-tiny", upload_command)
+    upload_command = env.Command(None, "usb-keypress-trigger.hex", commands)
+    env.Alias("upload", upload_command)
+
