@@ -46,10 +46,16 @@
  * Private Defines and Datatypes
  */
 
+#define ARCADE_BUTTON_DDR (DDRB)
+#define ARCADE_BUTTON_PIN (1)
+#define ARCADE_BUTTON_PORT (PORTB)
+#define ARCADE_BUTTON_PINS (PINB)
+
 /*
  * Private Variables
  */
 
+static bool s_hwb_button_pressed = false;
 static bool s_keypress_trigger_flag = false;
 
 /** Buffer to hold the previously generated Keyboard HID report, for comparison purposes inside the HID class driver. */
@@ -74,15 +80,70 @@ USB_ClassInfo_HID_Device_t Keyboard_HID_Interface =
 }, };
 
 /*
- * Function Prototypes
+ * Private Functions
  */
 
-void MinimusButtonCallback(MINIMUS_BUTTON_ENUM eButton,
-		MINIMUS_BUTTONSTATE_ENUM eState);
-void Application_MsTick(void);
+static void setup_io()
+{
+	ARCADE_BUTTON_DDR &= ~_BV(ARCADE_BUTTON_PIN);
+	ARCADE_BUTTON_PORT |= _BV(ARCADE_BUTTON_PIN);
+}
 
-void SendNextReport(void);
-void ReceiveNextReport(void);
+static bool poll_arcade_button()
+{
+	static int8_t counter = 0;
+	static bool already_pressed = false;
+
+	bool pressed = false;
+
+	counter += (ARCADE_BUTTON_PINS & _BV(ARCADE_BUTTON_PIN)) ? -1 : 1;
+
+	if (counter > 20) { counter = 20; }
+	if (counter < 0) { counter = 0; }
+
+	if (counter == 0) { already_pressed = false; }
+
+	if (!already_pressed)
+	{
+		pressed = counter == 20;
+		already_pressed = pressed;
+	}
+
+	return pressed;	
+}
+
+static void handle_led(bool on)
+{
+	static uint8_t counter = 0;
+
+	if (on) { counter = 200; }
+
+	Minimus_LED_Control(LED2, counter > 0 ? LED_ON : LED_OFF);
+                        
+	if (counter > 0) { counter--; }
+}
+
+static void handle_buttons()
+{
+	bool external_button_pressed = poll_arcade_button();
+	s_keypress_trigger_flag = external_button_pressed || s_hwb_button_pressed;
+}
+
+static void application_tick()
+{
+	handle_buttons();
+	handle_led(s_keypress_trigger_flag);
+}
+
+/*
+ * Public Functions
+ */
+
+void MinimusButtonCallback(MINIMUS_BUTTON_ENUM eButton, MINIMUS_BUTTONSTATE_ENUM eNewState)
+{
+	(void)eButton;
+	s_hwb_button_pressed = eNewState == BUTTONDN;
+}
 
 int main(void)
 {
@@ -92,7 +153,8 @@ int main(void)
 
 	/* Allow Minimus to setup the microcontroller for itself */
 	Minimus_Init(MinimusButtonCallback);
-	Minimus_LED_Control(LED1, LED_ON);
+
+	setup_io();
 
 	USB_Init();
 
@@ -109,31 +171,16 @@ int main(void)
 }
 
 /*
- * Private Functions
+ * USB event handlers
  */
 
 /** Event handler for the USB device Start Of Frame event. */
 void EVENT_USB_Device_StartOfFrame(void)
 {
 	HID_Device_MillisecondElapsed(&Keyboard_HID_Interface);
-
 	Minimus_USB_MsTick();
-	Application_MsTick();
-}
 
-/** Event handler for the library USB Connection event. */
-void EVENT_USB_Device_Connect(void)
-{
-}
-
-/** Event handler for the library USB Disconnection event. */
-void EVENT_USB_Device_Disconnect(void)
-{
-}
-
-/** Event handler for the library USB reset event. */
-void EVENT_USB_Device_Reset(void)
-{
+	application_tick();
 }
 
 /** Event handler for the library USB Configuration Changed event. */
@@ -207,16 +254,8 @@ void CALLBACK_HID_Device_ProcessHIDReport(
 	(void) ReportSize;
 }
 
-void Application_MsTick(void)
-{
+/* Unhandled USB library events */
+void EVENT_USB_Device_Connect(void) {}
+void EVENT_USB_Device_Disconnect(void) {}
+void EVENT_USB_Device_Reset(void) {}
 
-}
-
-void MinimusButtonCallback(MINIMUS_BUTTON_ENUM eButton, MINIMUS_BUTTONSTATE_ENUM eNewState)
-{
-	(void)eButton;
-	if (eNewState == BUTTONDN && !s_keypress_trigger_flag)
-	{
-		s_keypress_trigger_flag = true;
-	}
-}
